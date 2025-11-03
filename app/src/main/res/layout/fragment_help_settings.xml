@@ -42,6 +42,34 @@
             android:textColor="#FFFFFF" />
     </LinearLayout>
 
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Choose Wake Word:"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <RadioGroup
+        android:id="@+id/wakeWordRadioGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="20dp">
+
+        <RadioButton
+            android:id="@+id/helpMeRadioButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Help me" />
+
+        <RadioButton
+            android:id="@+id/leaveMeAloneRadioButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Leave me alone" />
+    </RadioGroup>
+
     <!-- Start Listening Button -->
     <Button
         android:id="@+id/startButton"

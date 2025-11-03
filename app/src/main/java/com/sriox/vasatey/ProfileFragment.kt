@@ -4,28 +4,20 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import androidx.lifecycle.lifecycleScope
 import com.sriox.vasatey.databinding.FragmentProfileBinding
-import com.sriox.vasatey.models.User
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
 
 class ProfileFragment : Fragment() {
 
     private var _binding: FragmentProfileBinding? = null
     private val binding get() = _binding!!
 
-    private val auth = FirebaseAuth.getInstance()
-    private val db = FirebaseFirestore.getInstance()
-    private var currentUser: User? = null
+    private val authHelper = SupabaseAuthHelper()
+    private val dbHelper = SupabaseDatabaseHelper()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -42,78 +34,93 @@ class ProfileFragment : Fragment() {
 
         binding.updateProfileButton.setOnClickListener {
             val newName = binding.nameInput.text.toString().trim()
-            if (newName.isNotEmpty()) {
-                updateUserName(newName)
+            val newMobile = binding.mobileInput.text.toString().trim()
+
+            if (newName.isNotEmpty() && newMobile.isNotEmpty()) {
+                updateUserProfile(newName, newMobile)
+            } else {
+                Toast.makeText(requireContext(), "Please fill all fields", Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.changePasswordButton.setOnClickListener {
-            showSecurityQuestionsDialog()
+            showPasswordResetConfirmationDialog()
         }
     }
 
     private fun loadUserData() {
-        val userEmail = auth.currentUser?.email
-        if (userEmail != null) {
-            db.collection("users").document(userEmail).get()
-                .addOnSuccessListener { document ->
-                    if (document != null) {
-                        currentUser = document.toObject(User::class.java)
-                        binding.nameInput.setText(currentUser?.name)
-                        binding.emailInput.setText(currentUser?.email)
-                        binding.emailInput.isEnabled = false // Don't allow email editing
+        val currentUser = authHelper.getCurrentUser()
+        if (currentUser != null) {
+            lifecycleScope.launch {
+                authHelper.getUserProfile(currentUser.email ?: "").fold(
+                    onSuccess = { profile ->
+                        profile?.let {
+                            binding.nameInput.setText(it.fullName)
+                            binding.emailInput.setText(it.email)
+                            binding.mobileInput.setText(it.phoneNumber ?: "")
+                            binding.emailInput.isEnabled = false
+                        }
+                    },
+                    onFailure = { 
+                        Toast.makeText(requireContext(), "Failed to load profile", Toast.LENGTH_SHORT).show()
                     }
-                }
-        }
-    }
-
-    private fun updateUserName(newName: String) {
-        val userEmail = auth.currentUser?.email
-        if (userEmail != null) {
-            db.collection("users").document(userEmail).update("name", newName)
-                .addOnSuccessListener {
-                    Toast.makeText(requireContext(), "Name updated successfully", Toast.LENGTH_SHORT).show()
-                }
-                .addOnFailureListener { 
-                    Toast.makeText(requireContext(), "Failed to update name", Toast.LENGTH_SHORT).show()
-                }
-        }
-    }
-
-    private fun showSecurityQuestionsDialog() {
-        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_security_questions, null)
-        val schoolInput = dialogView.findViewById<EditText>(R.id.schoolAnswer)
-        val petInput = dialogView.findViewById<EditText>(R.id.petAnswer)
-
-        AlertDialog.Builder(requireContext())
-            .setTitle("Verify Your Identity")
-            .setView(dialogView)
-            .setPositiveButton("Verify") { _, _ ->
-                val schoolAnswer = schoolInput.text.toString().trim()
-                val petAnswer = petInput.text.toString().trim()
-                verifySecurityAnswers(schoolAnswer, petAnswer)
+                )
             }
-            .setNegativeButton("Cancel", null)
+        }
+    }
+
+    private fun updateUserProfile(newName: String, newMobile: String) {
+        val currentUser = authHelper.getCurrentUser()
+        if (currentUser != null) {
+            lifecycleScope.launch {
+                // Show loading state
+                binding.updateProfileButton.isEnabled = false
+                binding.updateProfileButton.text = "Updating..."
+                
+                val updateMap = mutableMapOf<String, Any>()
+                updateMap["full_name"] = newName
+                if (newMobile.isNotEmpty()) {
+                    updateMap["phone_number"] = newMobile
+                }
+                
+                authHelper.updateUserProfile(currentUser.id, updateMap).fold(
+                    onSuccess = {
+                        Toast.makeText(requireContext(), "Profile updated successfully", Toast.LENGTH_SHORT).show()
+                        binding.updateProfileButton.text = "Update Profile"
+                        binding.updateProfileButton.isEnabled = true
+                    },
+                    onFailure = { error ->
+                        Toast.makeText(requireContext(), "Failed to update profile: ${error.message}", Toast.LENGTH_SHORT).show()
+                        binding.updateProfileButton.text = "Update Profile"
+                        binding.updateProfileButton.isEnabled = true
+                    }
+                )
+            }
+        }
+    }
+
+    private fun showPasswordResetConfirmationDialog() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Change Password")
+            .setMessage("Are you sure you want to send a password reset email?")
+            .setPositiveButton("Yes") { _, _ ->
+                sendPasswordResetEmail()
+            }
+            .setNegativeButton("No", null)
             .show()
     }
 
-    private fun verifySecurityAnswers(schoolAnswer: String, petAnswer: String) {
-        val storedSchoolAnswer = currentUser?.securityQuestions?.get("school")
-        val storedPetAnswer = currentUser?.securityQuestions?.get("pet")
-
-        if (schoolAnswer.equals(storedSchoolAnswer, ignoreCase = true) && petAnswer.equals(storedPetAnswer, ignoreCase = true)) {
-            sendPasswordResetEmail()
-        } else {
-            Toast.makeText(requireContext(), "Answers do not match. Please try again.", Toast.LENGTH_LONG).show()
+    private fun sendPasswordResetEmail() {
+        val userEmail = authHelper.getCurrentUser()?.email
+        if (userEmail != null) {
+            // Note: Supabase password reset would need to be implemented in SupabaseAuthHelper
+            // For now, just show a message
+            Toast.makeText(requireContext(), "Password reset functionality needs to be implemented with Supabase", Toast.LENGTH_LONG).show()
         }
     }
 
-    private fun sendPasswordResetEmail() {
-        val userEmail = auth.currentUser?.email
-        if (userEmail != null) {
-            auth.sendPasswordResetEmail(userEmail)
-                .addOnCompleteListener { task ->
-                    if (task.isSuccessful) {
-                        Toast.makeText(requireContext(), "Password reset email sent. Please check your inbox.", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(require...
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+}

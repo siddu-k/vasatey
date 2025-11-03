@@ -7,11 +7,9 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.fragment.app.Fragment
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
+import androidx.lifecycle.lifecycleScope
 import com.sriox.vasatey.databinding.FragmentGuardianSettingsBinding
+import kotlinx.coroutines.launch
 
 class GuardianSettingsFragment : Fragment() {
 
@@ -20,9 +18,9 @@ class GuardianSettingsFragment : Fragment() {
 
     private lateinit var guardiansAdapter: ArrayAdapter<String>
 
-    private val auth = FirebaseAuth.getInstance()
-    private val db = FirebaseFirestore.getInstance()
-    private val currentUserEmail get() = auth.currentUser?.email ?: ""
+    private val authHelper = SupabaseAuthHelper()
+    private val dbHelper = SupabaseDatabaseHelper()
+    private val currentUserAuthId get() = authHelper.getCurrentUser()?.id ?: ""
 
     private val guardiansList = mutableListOf<String>()
 
@@ -41,52 +39,102 @@ class GuardianSettingsFragment : Fragment() {
         guardiansAdapter = ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, guardiansList)
         binding.guardiansListView.adapter = guardiansAdapter
 
-        listenForGuardianUpdates()
+        loadGuardians()
 
         binding.addGuardianButton.setOnClickListener {
             val email = binding.guardianEmailInput.text.toString().trim()
-            if (email.isNotEmpty()) addGuardian(email)
+            val name = binding.guardianNameInput.text.toString().trim()
+            val phone = binding.guardianPhoneInput.text.toString().trim()
+            
+            if (email.isNotEmpty()) {
+                addGuardian(email, name, phone)
+            } else {
+                Toast.makeText(requireContext(), "Please enter guardian email", Toast.LENGTH_SHORT).show()
+            }
         }
 
-        binding.removeGuardianButton.setOnClickListener {
-            val email = binding.guardianEmailInput.text.toString().trim()
-            if (email.isNotEmpty()) removeGuardian(email)
+        binding.guardiansListView.setOnItemLongClickListener { _, _, position, _ ->
+            val guardianEmail = guardiansList[position]
+            removeGuardian(guardianEmail)
+            true
         }
     }
 
-    private fun addGuardian(email: String) {
-        val userRef = db.collection("users").document(currentUserEmail)
-        userRef.set(mapOf("guardians" to FieldValue.arrayUnion(email)), SetOptions.merge())
-            .addOnSuccessListener {
-                Toast.makeText(requireContext(), "Guardian added: $email", Toast.LENGTH_SHORT).show()
-                binding.guardianEmailInput.text.clear()
+    private fun loadGuardians() {
+        if (currentUserAuthId.isEmpty()) return
+        
+        lifecycleScope.launch {
+            // First get the user profile ID
+            val profileIdResult = dbHelper.getUserProfileId(currentUserAuthId)
+            val profileId = profileIdResult.getOrNull()
+            
+            if (profileId == null) {
+                Toast.makeText(requireContext(), "User profile not found", Toast.LENGTH_SHORT).show()
+                return@launch
             }
-            .addOnFailureListener {
-                Toast.makeText(requireContext(), "Failed to add guardian", Toast.LENGTH_SHORT).show()
+            
+            dbHelper.getGuardiansForUser(profileId).fold(
+                onSuccess = { guardians ->
+                    guardiansList.clear()
+                    guardiansList.addAll(guardians.map { "${it.guardianName} (${it.guardianEmail ?: "No Email"})" })
+                    guardiansAdapter.notifyDataSetChanged()
+                },
+                onFailure = { error ->
+                    Toast.makeText(requireContext(), "Failed to load guardians: ${error.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+    }
+
+    private fun addGuardian(email: String, name: String = "", phone: String = "") {
+        if (currentUserAuthId.isEmpty()) return
+        
+        lifecycleScope.launch {
+            // First get the user profile ID
+            val profileIdResult = dbHelper.getUserProfileId(currentUserAuthId)
+            val profileId = profileIdResult.getOrNull()
+            
+            if (profileId == null) {
+                Toast.makeText(requireContext(), "User profile not found", Toast.LENGTH_SHORT).show()
+                return@launch
             }
+            
+            val guardian = Guardian(
+                userId = profileId, 
+                guardianEmail = email,
+                guardianName = name.ifEmpty { "Guardian" },
+                guardianPhone = phone.ifEmpty { "0000000000" }
+            )
+            
+            dbHelper.addGuardian(profileId, guardian).fold(
+                onSuccess = {
+                    binding.guardianEmailInput.text?.clear()
+                    binding.guardianNameInput.text?.clear()
+                    binding.guardianPhoneInput.text?.clear()
+                    loadGuardians() // Refresh the list
+                    Toast.makeText(requireContext(), "Guardian added successfully", Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { error ->
+                    Toast.makeText(requireContext(), "Failed to add guardian: ${error.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
     }
 
     private fun removeGuardian(email: String) {
-        val userRef = db.collection("users").document(currentUserEmail)
-        userRef.update("guardians", FieldValue.arrayRemove(email))
-            .addOnSuccessListener {
-                Toast.makeText(requireContext(), "Guardian removed: $email", Toast.LENGTH_SHORT).show()
-                binding.guardianEmailInput.text.clear()
-            }
-            .addOnFailureListener {
-                Toast.makeText(requireContext(), "Failed to remove guardian", Toast.LENGTH_SHORT).show()
-            }
-    }
-
-    private fun listenForGuardianUpdates() {
-        if (currentUserEmail.isEmpty()) return
-        val userRef = db.collection("users").document(currentUserEmail)
-        userRef.addSnapshotListener { snapshot, error ->
-            if (error != null) return@addSnapshotListener
-            val list = snapshot?.get("guardians") as? List<String> ?: emptyList()
-            guardiansList.clear()
-            guardiansList.addAll(list)
-            guardiansAdapter.notifyDataSetChanged()
+        if (currentUserAuthId.isEmpty()) return
+        
+        lifecycleScope.launch {
+            // For now, we'll pass the email as the guardianId since we need a way to identify the guardian
+            dbHelper.removeGuardian(email).fold(
+                onSuccess = {
+                    loadGuardians() // Refresh the list
+                    Toast.makeText(requireContext(), "Guardian removed successfully", Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { error ->
+                    Toast.makeText(requireContext(), "Failed to remove guardian: ${error.message}", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
 

@@ -1,81 +1,138 @@
 package com.sriox.vasatey
 
-import android.Manifest
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import androidx.activity.result.contract.ActivityResultContracts
+import android.view.MenuItem
+import android.widget.Toast
+import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
+import androidx.core.view.GravityCompat
+import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.navigation.NavigationView
+import com.sriox.vasatey.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
-    private val permissions = arrayOf(
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.POST_NOTIFICATIONS,
-        Manifest.permission.FOREGROUND_SERVICE_MICROPHONE
-    )
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var authHelper: SupabaseAuthHelper
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        createNotificationChannel()
+        authHelper = SupabaseAuthHelper()
 
-        val startButton = findViewById<Button>(R.id.startButton)
-        startButton.setOnClickListener {
-            if (hasPermissions()) {
+        setSupportActionBar(binding.toolbar)
+
+        val toggle = ActionBarDrawerToggle(
+            this,
+            binding.drawerLayout,
+            binding.toolbar,
+            R.string.navigation_drawer_open,
+            R.string.navigation_drawer_close
+        )
+        binding.drawerLayout.addDrawerListener(toggle)
+        toggle.syncState()
+
+        binding.navView.setNavigationItemSelectedListener(this)
+
+        if (savedInstanceState == null) {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fragment_container, HomeFragment())
+                .commit()
+            binding.navView.setCheckedItem(R.id.nav_home)
+        }
+        
+        // Check and request permissions
+        checkPermissions()
+    }
+    
+    private fun checkPermissions() {
+        if (!PermissionManager.checkAllPermissions(this)) {
+            PermissionManager.showPermissionExplanation(this) {
+                PermissionManager.requestPermissions(this)
+            }
+        } else {
+            // All permissions granted, show battery optimization dialog
+            PermissionManager.showBatteryOptimizationDialog(this)
+            // Start listening service
+            startListeningService()
+        }
+    }
+    
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        
+        if (requestCode == PermissionManager.PERMISSION_REQUEST_CODE) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            
+            if (allGranted) {
+                Toast.makeText(this, "All permissions granted! Vasatey is now protecting you.", Toast.LENGTH_LONG).show()
+                PermissionManager.showBatteryOptimizationDialog(this)
                 startListeningService()
             } else {
-                requestPermissions.launch(permissions)
+                Toast.makeText(this, "Some permissions were denied. Vasatey may not work properly.", Toast.LENGTH_LONG).show()
             }
         }
     }
-
-    private val requestPermissions =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { perms ->
-            if (perms.values.all { it }) startListeningService()
-        }
-
-    private fun hasPermissions(): Boolean =
-        permissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-
+    
     private fun startListeningService() {
-        val intent = Intent(this, ListeningService::class.java)
-        ContextCompat.startForegroundService(this, intent)
-        showNotification("Vasatey", "Listening for 'help'…")
+        if (PermissionManager.hasMicrophonePermission(this)) {
+            val intent = Intent(this, ListeningService::class.java)
+            startForegroundService(intent)
+        }
     }
 
-    private fun showNotification(title: String, message: String) {
-        val notification = NotificationCompat.Builder(this, "vasatey_channel")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .build()
-
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(1, notification)
+    override fun onNavigationItemSelected(item: MenuItem): Boolean {
+        when (item.itemId) {
+            R.id.nav_home -> {
+                replaceFragment(HomeFragment())
+            }
+            R.id.nav_alerts -> {
+                replaceFragment(AlertsFragment())
+            }
+            R.id.nav_call_for_help -> {
+                replaceFragment(HelpSettingsFragment())
+            }
+            R.id.nav_guardians -> {
+                replaceFragment(GuardianSettingsFragment())
+            }
+            R.id.nav_profile -> {
+                replaceFragment(ProfileFragment())
+            }
+            R.id.nav_logout -> {
+                lifecycleScope.launch {
+                    authHelper.signOut()
+                    val intent = Intent(this@MainActivity, LoginActivity::class.java)
+                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    startActivity(intent)
+                    finish()
+                }
+            }
+        }
+        binding.drawerLayout.closeDrawer(GravityCompat.START)
+        return true
     }
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "vasatey_channel",
-                "Vasatey Notifications",
-                NotificationManager.IMPORTANCE_DEFAULT
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+    fun replaceFragment(fragment: Fragment) {
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fragment_container, fragment)
+            .commit()
+    }
+
+    override fun onBackPressed() {
+        if (binding.drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            binding.drawerLayout.closeDrawer(GravityCompat.START)
+        } else {
+            super.onBackPressed()
         }
     }
 }

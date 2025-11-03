@@ -1,3 +1,9 @@
 <resources>
     <string name="app_name">vasatey</string>
+    <string name="add_guardian_success">✅ Guardian added successfully!</string>
+    <string name="add_guardian_failure">❌ Failed to add guardian: %s</string>
+    <string name="user_not_logged_in">User not logged in</string>
+    <string name="please_enter_guardian_email">Please enter a guardian email</string>
+    <string name="navigation_drawer_open">Open navigation drawer</string>
+    <string name="navigation_drawer_close">Close navigation drawer</string>
 </resources>
