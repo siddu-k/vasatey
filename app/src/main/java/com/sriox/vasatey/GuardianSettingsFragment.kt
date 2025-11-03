@@ -1,6 +1,7 @@
 package com.sriox.vasatey
 
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -87,14 +88,23 @@ class GuardianSettingsFragment : Fragment() {
     }
 
     private fun addGuardian(email: String, name: String = "", phone: String = "") {
-        if (currentUserAuthId.isEmpty()) return
+        if (currentUserAuthId.isEmpty()) {
+            Log.e("GuardianSettings", "Current user auth ID is empty")
+            return
+        }
+        
+        Log.d("GuardianSettings", "Adding guardian: email=$email, name=$name, phone=$phone")
+        Log.d("GuardianSettings", "Current user auth ID: $currentUserAuthId")
         
         lifecycleScope.launch {
             // First get the user profile ID
             val profileIdResult = dbHelper.getUserProfileId(currentUserAuthId)
             val profileId = profileIdResult.getOrNull()
             
+            Log.d("GuardianSettings", "Profile ID result: $profileId")
+            
             if (profileId == null) {
+                Log.e("GuardianSettings", "User profile not found for auth ID: $currentUserAuthId")
                 Toast.makeText(requireContext(), "User profile not found", Toast.LENGTH_SHORT).show()
                 return@launch
             }
@@ -106,8 +116,11 @@ class GuardianSettingsFragment : Fragment() {
                 guardianPhone = phone.ifEmpty { "0000000000" }
             )
             
+            Log.d("GuardianSettings", "Created guardian object: $guardian")
+            
             dbHelper.addGuardian(profileId, guardian).fold(
                 onSuccess = {
+                    Log.d("GuardianSettings", "Guardian added successfully")
                     binding.guardianEmailInput.text?.clear()
                     binding.guardianNameInput.text?.clear()
                     binding.guardianPhoneInput.text?.clear()
@@ -115,6 +128,7 @@ class GuardianSettingsFragment : Fragment() {
                     Toast.makeText(requireContext(), "Guardian added successfully", Toast.LENGTH_SHORT).show()
                 },
                 onFailure = { error ->
+                    Log.e("GuardianSettings", "Failed to add guardian", error)
                     Toast.makeText(requireContext(), "Failed to add guardian: ${error.message}", Toast.LENGTH_SHORT).show()
                 }
             )

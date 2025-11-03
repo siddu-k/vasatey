@@ -113,6 +113,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             R.id.nav_profile -> {
                 replaceFragment(ProfileFragment())
             }
+            R.id.nav_refresh_token -> {
+                refreshFCMToken()
+            }
             R.id.nav_logout -> {
                 lifecycleScope.launch {
                     authHelper.signOut()
@@ -187,6 +190,74 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             }
         }.addOnFailureListener { error ->
             Log.e("MainActivity", "Failed to get FCM token", error)
+        }
+    }
+
+    // Add this method to manually refresh FCM token
+    fun refreshFCMToken() {
+        Log.d("MainActivity", "Manual FCM token refresh requested")
+        Toast.makeText(this, "Refreshing FCM token...", Toast.LENGTH_SHORT).show()
+        
+        val messaging = FirebaseMessaging.getInstance()
+        
+        // First, let's see what the current token is
+        messaging.token.addOnCompleteListener { currentTokenTask ->
+            val currentToken = if (currentTokenTask.isSuccessful) currentTokenTask.result else "failed"
+            Log.d("MainActivity", "Current token before refresh: ${currentToken.take(30)}...")
+            
+            // Now try to delete and get a new one
+            messaging.deleteToken().addOnCompleteListener { deleteTask ->
+                Log.d("MainActivity", "Delete token result: ${deleteTask.isSuccessful}")
+                if (deleteTask.exception != null) {
+                    Log.e("MainActivity", "Delete token error: ${deleteTask.exception?.message}")
+                }
+                
+                // Try to clear FCM app instance as well
+                try {
+                    val firebaseApp = com.google.firebase.FirebaseApp.getInstance()
+                    Log.d("MainActivity", "Firebase app instance: ${firebaseApp.name}")
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Firebase app access error: ${e.message}")
+                }
+                
+                // Wait and get a new token
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    messaging.token.addOnCompleteListener { newTokenTask ->
+                        if (newTokenTask.isSuccessful) {
+                            val newToken = newTokenTask.result
+                            Log.d("MainActivity", "New token after refresh: ${newToken.take(30)}...")
+                            
+                            if (newToken == currentToken) {
+                                Log.w("MainActivity", "WARNING: Token didn't change! Still same token")
+                                Toast.makeText(this@MainActivity, "Warning: Token didn't change - may need app restart", Toast.LENGTH_LONG).show()
+                            } else {
+                                Log.d("MainActivity", "SUCCESS: Got a different token!")
+                                Toast.makeText(this@MainActivity, "Success: Got new token!", Toast.LENGTH_SHORT).show()
+                            }
+                            
+                            val currentUser = authHelper.getCurrentUser()
+                            if (currentUser != null) {
+                                lifecycleScope.launch {
+                                    val dbHelper = SupabaseDatabaseHelper()
+                                    dbHelper.updateFCMToken(currentUser.id, newToken).fold(
+                                        onSuccess = { 
+                                            Log.d("MainActivity", "FCM token updated in database for user: ${currentUser.id}")
+                                            Toast.makeText(this@MainActivity, "Token saved! Try notification again.", Toast.LENGTH_LONG).show()
+                                        },
+                                        onFailure = { error ->
+                                            Log.e("MainActivity", "Failed to save FCM token", error)
+                                            Toast.makeText(this@MainActivity, "Failed to save: ${error.message}", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                }
+                            }
+                        } else {
+                            Log.e("MainActivity", "Failed to get new token", newTokenTask.exception)
+                            Toast.makeText(this@MainActivity, "Failed to get new token: ${newTokenTask.exception?.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }, 2000) // Wait 2 seconds
+            }
         }
     }
 

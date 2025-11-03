@@ -1,0 +1,18 @@
+{
+  "name": "vasatey-vercel-server",
+  "version": "1.0.0",
+  "description": "Vercel server for Vasatey emergency notification system",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "vercel build",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

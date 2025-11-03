@@ -21,6 +21,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.sriox.vasatey.models.VercelNotificationRequest
 import com.sriox.vasatey.network.RetrofitInstance
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.*
 import kotlinx.coroutines.tasks.await
 
@@ -37,10 +38,12 @@ class ListeningService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.d("ListeningService", "=== SERVICE STARTING ===")
         alertHistoryManager = AlertHistoryManager(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         acquireWakeLock()
         startForegroundService()
+        Log.d("ListeningService", "Starting Porcupine listening...")
         startPorcupineListening()
     }
 
@@ -132,8 +135,11 @@ class ListeningService : Service() {
                 
                 val keywordPath = FileUtils.extractAsset(this@ListeningService, keywordFileName)
 
-                val callback = PorcupineManagerCallback { _ ->
+                val callback = PorcupineManagerCallback { keywordIndex ->
+                    Log.d("ListeningService", "=== WAKE WORD DETECTED ===")
+                    Log.d("ListeningService", "Keyword index: $keywordIndex")
                     Log.d("ListeningService", "Wake word '$wakeWord' detected!")
+                    Log.d("ListeningService", "Triggering help alert...")
                     triggerHelpAlertToGuardians()
                 }
 
@@ -161,21 +167,41 @@ class ListeningService : Service() {
     }
 
     private fun triggerHelpAlertToGuardians() = serviceScope.launch {
+        Log.d("ListeningService", "=== HELP ALERT TRIGGERED ===")
+        
         val location = getCurrentLocation()
         if (location == null) {
             Log.w("ListeningService", "Proceeding with alert but without location data.")
         }
         
-        val currentUser = authHelper.getCurrentUser() ?: return@launch
-        val userEmail = currentUser.email ?: return@launch
+        val currentUser = authHelper.getCurrentUser()
+        if (currentUser == null) {
+            Log.e("ListeningService", "No current user found")
+            return@launch
+        }
+        
+        val userEmail = currentUser.email
+        if (userEmail == null) {
+            Log.e("ListeningService", "No user email found")
+            return@launch
+        }
+        
+        Log.d("ListeningService", "Current user: $userEmail")
         
         try {
             // Get guardians from Supabase
+            Log.d("ListeningService", "Getting guardians for user: $userEmail")
             val guardiansResult = dbHelper.getGuardiansForUser(userEmail)
-            val guardians = guardiansResult.getOrElse { emptyList() }
+            val guardians = guardiansResult.getOrElse { 
+                Log.e("ListeningService", "Failed to get guardians")
+                emptyList() 
+            }
 
+            Log.d("ListeningService", "Found ${guardians.size} guardians")
+            
             if (guardians.isEmpty()) {
-                showErrorNotification("You have no guardians to alert.")
+                Log.w("ListeningService", "No guardians found - showing error notification")
+                showErrorNotification("You have no guardians to alert. Please add guardians in settings.")
                 return@launch
             }
 
@@ -197,7 +223,7 @@ class ListeningService : Service() {
                 if (successCount > 0) {
                     showDetectedNotification(successCount, guardians.size)
                 } else {
-                    showErrorNotification("Help alert failed to send. Check connection.")
+                    showErrorNotification("Help alert failed to send. Check connection and guardian setup.")
                 }
             }
         } catch (e: Exception) {
@@ -221,12 +247,46 @@ class ListeningService : Service() {
 
     private suspend fun sendNotificationToGuardian(guardianEmail: String, fromUserName: String, fromUserEmail: String, fromUserMobile: String?, lat: Double?, lon: Double?): Boolean {
         return try {
-            // Get guardian's FCM token from Supabase
-            val guardianProfile = authHelper.getUserProfile(guardianEmail).getOrNull()
-            val guardianToken = guardianProfile?.fcmToken
-
-            if (guardianToken == null) {
-                Log.w("ListeningService", "Guardian $guardianEmail has no FCM token.")
+            Log.d("ListeningService", "=== SENDING NOTIFICATION ===")
+            Log.d("ListeningService", "Guardian Email: $guardianEmail")
+            
+            var guardianToken: String? = null
+            
+            // If the guardian is the current user, get fresh FCM token directly from Firebase
+            val currentUser = authHelper.getCurrentUser()
+            if (currentUser?.email == guardianEmail) {
+                Log.d("ListeningService", "Guardian is current user - getting fresh FCM token from Firebase")
+                try {
+                    guardianToken = com.google.firebase.messaging.FirebaseMessaging.getInstance().token.await()
+                    Log.d("ListeningService", "Got fresh FCM token: ${guardianToken.take(20)}...")
+                    
+                    // Update database with fresh token
+                    dbHelper.updateFCMToken(currentUser.id, guardianToken)
+                    Log.d("ListeningService", "Updated database with fresh token")
+                } catch (e: Exception) {
+                    Log.e("ListeningService", "Failed to get fresh FCM token", e)
+                }
+            }
+            
+            // If we don't have a fresh token, get from database
+            if (guardianToken.isNullOrEmpty()) {
+                Log.d("ListeningService", "Getting token from database")
+                val supabase = SupabaseClient.client
+                val allProfiles = supabase.from("user_profiles")
+                    .select()
+                    .decodeList<UserProfile>()
+                
+                Log.d("ListeningService", "Total profiles found: ${allProfiles.size}")
+                
+                val guardianProfile = allProfiles.firstOrNull { it.email == guardianEmail }
+                guardianToken = guardianProfile?.fcmToken
+                
+                Log.d("ListeningService", "Guardian profile found: ${guardianProfile != null}")
+                Log.d("ListeningService", "Database token: ${if (guardianToken.isNullOrEmpty()) "NONE" else guardianToken.take(20) + "..."}")
+            }
+            
+            if (guardianToken.isNullOrEmpty()) {
+                Log.e("ListeningService", "No FCM token found for guardian: $guardianEmail")
                 return false
             }
 
@@ -241,14 +301,35 @@ class ListeningService : Service() {
                 lastKnownLongitude = lon
             )
 
+            Log.d("ListeningService", "=== REQUEST TO VERCEL ===")
+            Log.d("ListeningService", "URL: https://vasatey-notify-msg.vercel.app/api/sendNotification")
+            Log.d("ListeningService", "Token: ${guardianToken.take(20)}...")
+            Log.d("ListeningService", "Title: ${request.title}")
+            Log.d("ListeningService", "Body: ${request.body}")
+            Log.d("ListeningService", "From Name: ${request.fullName}")
+            Log.d("ListeningService", "From Email: ${request.email}")
+            Log.d("ListeningService", "Phone: ${request.phoneNumber}")
+            Log.d("ListeningService", "Lat: ${request.lastKnownLatitude}")
+            Log.d("ListeningService", "Lng: ${request.lastKnownLongitude}")
+
             val response = RetrofitInstance.api.sendNotification(request)
-            if (response.isSuccessful) {
-                logAlertToSupabase(fromUserName, fromUserEmail, fromUserMobile, lat, lon)
-                true
+            
+            Log.d("ListeningService", "=== RESPONSE FROM VERCEL ===")
+            Log.d("ListeningService", "Response Code: ${response.code()}")
+            Log.d("ListeningService", "Is Successful: ${response.isSuccessful}")
+            Log.d("ListeningService", "Response Message: ${response.message()}")
+            
+            if (!response.isSuccessful) {
+                val errorBody = response.errorBody()?.string()
+                Log.e("ListeningService", "Error Body: $errorBody")
             } else {
-                false
+                val responseBody = response.body()?.string()
+                Log.d("ListeningService", "Success Body: $responseBody")
             }
+            
+            response.isSuccessful
         } catch (e: Exception) {
+            Log.e("ListeningService", "Exception in sendNotificationToGuardian", e)
             false
         }
     }

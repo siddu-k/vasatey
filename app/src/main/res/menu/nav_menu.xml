@@ -26,6 +26,10 @@
                 android:icon="@android:drawable/ic_menu_edit"
                 android:title="Profile" />
             <item
+                android:id="@+id/nav_refresh_token"
+                android:icon="@android:drawable/ic_menu_rotate"
+                android:title="Refresh Token" />
+            <item
                 android:id="@+id/nav_logout"
                 android:icon="@android:drawable/ic_menu_close_clear_cancel"
                 android:title="Logout" />

@@ -2,6 +2,8 @@ package com.sriox.vasatey
 
 import android.util.Log
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.query.filter.FilterOperation
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -144,13 +146,21 @@ class SupabaseDatabaseHelper {
     suspend fun addGuardian(userId: String, guardian: Guardian): Result<Unit> {
         return try {
             withContext(Dispatchers.IO) {
-                supabase.from("guardians")
-                    .insert(guardian.copy(userId = userId))
+                Log.d("SupabaseDB", "Adding guardian for user: $userId")
+                Log.d("SupabaseDB", "Guardian details: email=${guardian.guardianEmail}, name=${guardian.guardianName}, phone=${guardian.guardianPhone}")
                 
+                val guardianToInsert = guardian.copy(userId = userId)
+                Log.d("SupabaseDB", "Guardian to insert: $guardianToInsert")
+                
+                supabase.from("guardians")
+                    .insert(guardianToInsert)
+                
+                Log.d("SupabaseDB", "Guardian added successfully for user: $userId")
                 Result.success(Unit)
             }
         } catch (e: Exception) {
-            Log.e("SupabaseDB", "Failed to add guardian", e)
+            Log.e("SupabaseDB", "Failed to add guardian for user: $userId", e)
+            Log.e("SupabaseDB", "Guardian data: ${guardian.guardianEmail}, ${guardian.guardianName}")
             Result.failure(e)
         }
     }
@@ -218,14 +228,16 @@ class SupabaseDatabaseHelper {
                 
                 Log.d("SupabaseDB", "Getting FCM tokens for guardians: $guardianIds")
                 
+                // Get all user profiles and filter for guardian IDs
                 val result = supabase.from("user_profiles")
-                    .select("fcm_token")
-                    .`in`("id", guardianIds)
-                    .decodeList<Map<String, String>>()
+                    .select()
+                    .decodeList<UserProfile>()
                 
-                val tokens = result.mapNotNull { row -> 
-                    row["fcm_token"]?.takeIf { it.isNotBlank() }
-                }
+                val tokens = result
+                    .filter { profile -> guardianIds.contains(profile.id) }
+                    .mapNotNull { profile -> 
+                        profile.fcmToken?.takeIf { it.isNotBlank() }
+                    }
                 
                 Log.d("SupabaseDB", "Found ${tokens.size} valid FCM tokens for ${guardianIds.size} guardians")
                 Result.success(tokens)

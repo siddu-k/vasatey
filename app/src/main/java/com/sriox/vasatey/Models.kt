@@ -25,6 +25,11 @@ data class UserProfile(
 )
 
 @Serializable
+data class UserProfileId(
+    val id: String = ""
+)
+
+@Serializable
 data class UserSettings(
     val id: String = "",
     @SerialName("user_id") val userId: String = "",
