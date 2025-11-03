@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <!-- Guardian Email Input -->
+    <EditText
+        android:id="@+id/guardianEmailInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Enter Guardian Email"
+        android:inputType="textEmailAddress"
+        android:padding="12dp"
+        android:background="@android:drawable/edit_text"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Add Guardian Button -->
+    <Button
+        android:id="@+id/addGuardianButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Add Guardian"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="#4CAF50"
+        android:textColor="#FFFFFF" />
+
+    <!-- Remove Guardian Button -->
+    <Button
+        android:id="@+id/removeGuardianButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Remove Guardian"
+        android:layout_marginBottom="20dp"
+        android:backgroundTint="#F44336"
+        android:textColor="#FFFFFF" />
+
+    <ListView
+        android:id="@+id/guardiansListView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>
