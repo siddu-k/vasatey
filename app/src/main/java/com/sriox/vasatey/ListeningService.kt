@@ -219,6 +219,12 @@ class ListeningService : Service() {
             val results = notificationTasks.awaitAll()
             val successCount = results.count { it }
 
+            // Log the alert to the database for history
+            if (successCount > 0) {
+                Log.d("ListeningService", "Logging alert to database...")
+                logAlertToSupabase(userName, userEmail, mobileNumber, location?.latitude, location?.longitude)
+            }
+
             withContext(Dispatchers.Main) {
                 if (successCount > 0) {
                     showDetectedNotification(successCount, guardians.size)
@@ -336,11 +342,14 @@ class ListeningService : Service() {
 
     private suspend fun logAlertToSupabase(fromUserName: String, fromUserEmail: String, fromUserMobile: String?, lat: Double?, lon: Double?) {
         try {
+            Log.d("ListeningService", "=== LOGGING ALERT TO DATABASE ===")
             val currentUser = authHelper.getCurrentUser()
             if (currentUser != null) {
                 // Get the user profile ID instead of using auth ID
                 val profileIdResult = dbHelper.getUserProfileId(currentUser.id)
                 val profileId = profileIdResult.getOrNull()
+                
+                Log.d("ListeningService", "Profile ID: $profileId")
                 
                 if (profileId != null) {
                     val alert = Alert(
@@ -353,9 +362,20 @@ class ListeningService : Service() {
                         alertMessage = "Emergency alert from $fromUserName - Mobile: ${fromUserMobile ?: "Not available"}"
                     )
                     
+                    Log.d("ListeningService", "Saving alert: ${alert.alertType} at location ($lat, $lon)")
+                    
                     // Use AlertHistoryManager for smart storage management
-                    alertHistoryManager.saveAlert(alert, profileId)
+                    val saveResult = alertHistoryManager.saveAlert(alert, profileId)
+                    if (saveResult.isSuccess) {
+                        Log.d("ListeningService", "Alert saved successfully!")
+                    } else {
+                        Log.e("ListeningService", "Failed to save alert: ${saveResult.exceptionOrNull()?.message}")
+                    }
+                } else {
+                    Log.e("ListeningService", "Profile ID is null")
                 }
+            } else {
+                Log.e("ListeningService", "Current user is null")
             }
         } catch (e: Exception) {
             Log.e("ListeningService", "Failed to log alert to Supabase", e)
