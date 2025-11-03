@@ -2,6 +2,7 @@
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -75,13 +76,33 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun getAndSaveFcmToken() {
-        FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
-            val currentUser = authHelper.getCurrentUser()
-            if (currentUser != null && currentUser.email != null) {
-                lifecycleScope.launch {
-                    val dbHelper = SupabaseDatabaseHelper()
-                    dbHelper.updateFCMToken(currentUser.id, token)
+        // Force delete any existing token first to ensure we get a fresh one
+        FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener { deleteTask ->
+            if (deleteTask.isSuccessful) {
+                Log.d("LoginActivity", "Successfully deleted old FCM token")
+            }
+            
+            // Get fresh token (whether delete succeeded or not)
+            FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                val currentUser = authHelper.getCurrentUser()
+                if (currentUser != null && currentUser.email != null) {
+                    lifecycleScope.launch {
+                        val dbHelper = SupabaseDatabaseHelper()
+                        dbHelper.updateFCMToken(currentUser.id, token).fold(
+                            onSuccess = { 
+                                Log.d("LoginActivity", "Fresh FCM token saved successfully for user: ${currentUser.id}")
+                                Log.d("LoginActivity", "Token: ${token.take(20)}...")
+                            },
+                            onFailure = { error ->
+                                Log.e("LoginActivity", "Failed to save FCM token", error)
+                            }
+                        )
+                    }
+                } else {
+                    Log.w("LoginActivity", "Cannot save FCM token - user not logged in")
                 }
+            }.addOnFailureListener { error ->
+                Log.e("LoginActivity", "Failed to get FCM token", error)
             }
         }
     }

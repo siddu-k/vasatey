@@ -108,23 +108,33 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Error sending message:', error);
+    console.error('Full error details:', {
+      code: error.code,
+      message: error.message,
+      token: token ? `${token.substring(0, 20)}...` : 'null',
+      timestamp: new Date().toISOString()
+    });
     
     // Handle specific Firebase errors
     if (error.code === 'messaging/registration-token-not-registered') {
+      console.log(`Token not registered: ${token ? token.substring(0, 20) + '...' : 'null'}`);
       return res.status(410).json({
         error: 'Token expired',
-        message: 'The FCM token is not registered or has expired',
+        message: 'The FCM token is not registered or has expired. Please refresh your app to get a new token.',
         code: error.code,
         action: 'refresh_token',
+        details: 'This token has been invalidated and should be refreshed by the app'
       });
     }
     
     if (error.code === 'messaging/invalid-registration-token') {
+      console.log(`Invalid token format: ${token ? token.substring(0, 20) + '...' : 'null'}`);
       return res.status(400).json({
         error: 'Invalid token format',
-        message: 'The FCM token format is invalid',
+        message: 'The FCM token format is invalid. Please refresh your app to get a valid token.',
         code: error.code,
         action: 'refresh_token',
+        details: 'Token format is malformed'
       });
     }
     

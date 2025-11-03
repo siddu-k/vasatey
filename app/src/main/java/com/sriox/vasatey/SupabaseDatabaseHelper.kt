@@ -192,12 +192,17 @@ class SupabaseDatabaseHelper {
             withContext(Dispatchers.IO) {
                 val updates = mapOf("fcm_token" to token)
                 supabase.from("user_profiles")
-                    .update(updates)
+                    .update(updates) {
+                        filter {
+                            eq("id", userId)
+                        }
+                    }
                 
+                Log.d("SupabaseDB", "FCM token updated for user: $userId")
                 Result.success(Unit)
             }
         } catch (e: Exception) {
-            Log.e("SupabaseDB", "Failed to update FCM token", e)
+            Log.e("SupabaseDB", "Failed to update FCM token for user $userId", e)
             Result.failure(e)
         }
     }
@@ -206,15 +211,48 @@ class SupabaseDatabaseHelper {
     suspend fun getGuardianTokens(guardianIds: List<String>): Result<List<String>> {
         return try {
             withContext(Dispatchers.IO) {
+                if (guardianIds.isEmpty()) {
+                    Log.d("SupabaseDB", "No guardian IDs provided")
+                    return@withContext Result.success(emptyList())
+                }
+                
+                Log.d("SupabaseDB", "Getting FCM tokens for guardians: $guardianIds")
+                
                 val result = supabase.from("user_profiles")
-                    .select()
+                    .select("fcm_token")
+                    .`in`("id", guardianIds)
                     .decodeList<Map<String, String>>()
                 
-                val tokens = result.mapNotNull { it["fcm_token"] }
+                val tokens = result.mapNotNull { row -> 
+                    row["fcm_token"]?.takeIf { it.isNotBlank() }
+                }
+                
+                Log.d("SupabaseDB", "Found ${tokens.size} valid FCM tokens for ${guardianIds.size} guardians")
                 Result.success(tokens)
             }
         } catch (e: Exception) {
             Log.e("SupabaseDB", "Failed to get guardian tokens", e)
+            Result.failure(e)
+        }
+    }
+    
+    // Clean up invalid FCM token when we get registration error
+    suspend fun clearInvalidFcmToken(userId: String): Result<Unit> {
+        return try {
+            withContext(Dispatchers.IO) {
+                val updates = mapOf("fcm_token" to null)
+                supabase.from("user_profiles")
+                    .update(updates) {
+                        filter {
+                            eq("id", userId)
+                        }
+                    }
+                
+                Log.d("SupabaseDB", "Cleared invalid FCM token for user: $userId")
+                Result.success(Unit)
+            }
+        } catch (e: Exception) {
+            Log.e("SupabaseDB", "Failed to clear invalid FCM token for user $userId", e)
             Result.failure(e)
         }
     }
